@@ -1,0 +1,11 @@
+*.pdf
+*.aux
+*.tex
+*.bbl
+*.blg
+*.log
+*.gz
+*.pyc
+Working With Markdown Cells.ipynb
+*_files
+.ipynb_checkpoints
