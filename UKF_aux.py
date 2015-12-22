@@ -17,41 +17,59 @@ datacol = '0.4'
 utcols = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3']
 datacol2 = utcols[1]
 
-def KLGauss(mean, Sigma, mean2, Sigma2, eps=1e-12):
+
+def WassDist(mean, Sigma, mean2, Sigma2):
     # ensure that means are 1D arrays
     mean = mean.squeeze()
     mean2 = mean2.squeeze()
 
     # check that covariances are positive definite
+    # by computing matrix square roots
     try:
-        linalg.cholesky(Sigma);
-        linalg.cholesky(Sigma2);
+        SC  = linalg.cholesky(Sigma);
+        SC2 = linalg.cholesky(Sigma2);
     except linalg.LinAlgError:
         return np.nan
+    else:
+        return np.sqrt(linalg.norm(mean - mean2, ord=2) ** 2 +
+                       linalg.norm(SC - SC2, ord='fro') ** 2)
 
-    # compute difference in means
-    meandiff = mean - mean2
 
-    # ignoring tiny differences in dimensions with tiny variance
-    var = Sigma.diagonal()
-    var2 = Sigma2.diagonal()
-    tinyind = ((var < eps) * (var2 < eps)).nonzero()[0]
-    if tinyind.size > 0:
-        if meandiff[tinyind] < eps:
-            meandiff[tinyind] = 0.0
-
-    # compute inverse of Sigma2
-    Sigma2inv = linalg.inv(Sigma2)
-
-    # compute log determinants
-    (sign, logdet) = linalg.slogdet(Sigma)
-    sldet = sign * logdet
-    (sign, logdet) = linalg.slogdet(Sigma2)
-    sldet2 = sign * logdet
-
-    return ( Sigma2inv.dot(Sigma).trace() +
-             meandiff.dot(Sigma2inv).dot(meandiff) -
-             mean.size + sldet2 - sldet )
+#def KLGauss(mean, Sigma, mean2, Sigma2, eps=1e-12):
+#    # ensure that means are 1D arrays
+#    mean = mean.squeeze()
+#    mean2 = mean2.squeeze()
+#
+#    # check that covariances are positive definite
+#    try:
+#        linalg.cholesky(Sigma);
+#        linalg.cholesky(Sigma2);
+#    except linalg.LinAlgError:
+#        return np.nan
+#
+#    # compute difference in means
+#    meandiff = mean - mean2
+#
+#    # ignoring tiny differences in dimensions with tiny variance
+#    var = Sigma.diagonal()
+#    var2 = Sigma2.diagonal()
+#    tinyind = ((var < eps) * (var2 < eps)).nonzero()[0]
+#    if tinyind.size > 0:
+#        if meandiff[tinyind] < eps:
+#            meandiff[tinyind] = 0.0
+#
+#    # compute inverse of Sigma2
+#    Sigma2inv = linalg.inv(Sigma2)
+#
+#    # compute log determinants
+#    (sign, logdet) = linalg.slogdet(Sigma)
+#    sldet = sign * logdet
+#    (sign, logdet) = linalg.slogdet(Sigma2)
+#    sldet2 = sign * logdet
+#
+#    return ( Sigma2inv.dot(Sigma).trace() +
+#             meandiff.dot(Sigma2inv).dot(meandiff) -
+#             mean.size + sldet2 - sldet )
 
 
 def naiveSamplingEstimate(mean, cov, trfun, N=None):
@@ -312,7 +330,7 @@ def plotHDSamples(S, mean=None, cov=None, title=None, nplot=np.inf,
     return axes, leg
 
 
-def plotSamplingKLs(mean0, cov0, mean, cov, nsample, nrep, trfuns,
+def plotSamplingDis(mean0, cov0, mean, cov, nsample, nrep, trfuns,
                     desKL, funlabels=None, setlabels=None):
     if len(mean.shape) < 2:
         mean = mean[:, None, None]
@@ -334,33 +352,35 @@ def plotSamplingKLs(mean0, cov0, mean, cov, nsample, nrep, trfuns,
     estNs = np.zeros((desKL.size, nset, nfun))
     for trfi, trfun in enumerate(trfuns):
         for s in range(nset):
-            KLs = np.zeros((nrep, nsample.size))
+            Dis = np.zeros((nrep, nsample.size))
             for i, ns in enumerate(nsample):
                 for rep in range(nrep):
                     meantr, covtr, _ = naiveSamplingEstimate(mean0[:, s],
                                                              cov0, trfun, ns)
-                    KLs[rep, i] = KLGauss(mean[:, s, trfi],
+                    Dis[rep, i] = WassDist(mean[:, s, trfi],
                         cov[:, :, s, trfi], meantr, covtr)
 
-            KLmean = KLs.mean(axis=0)
-            Perc = np.percentile(KLs, [5, 95], axis=0)
+            Dismean = Dis.mean(axis=0)
+            Perc = np.percentile(Dis, [5, 95], axis=0)
 
             # plot mean with error bars
-            axes[trfi].errorbar(nsample * (1.0 + s/(4.0*nset)), KLmean,
-                                np.c_[KLmean - Perc[0, :], Perc[1, :] - KLmean].T,
+            axes[trfi].errorbar(nsample * (1.0 + s/(4.0*nset)), Dismean,
+                                np.c_[Dismean - Perc[0, :], Perc[1, :] - Dismean].T,
                                 label=setlabels[s])
 
             # estimate number of samples for desired accuracy
-            estNs[:, s, trfi] = np.interp(desKL, KLmean[::-1], nsample[::-1])
+            estNs[:, s, trfi] = np.interp(desKL, Dismean[::-1], nsample[::-1],
+                                          left=np.nan)
 
         if trfi == 0:
-            axes[trfi].set_ylabel('$D_{KL}$')
+            axes[trfi].set_ylabel('$W$')
             axes[trfi].legend()
 
         axes[trfi].set_xscale('log')
         axes[trfi].set_yscale('log')
         axes[trfi].set_xlabel('number of samples')
         axes[trfi].set_xlim([nsample[0]-3, 2*nsample[-1]]);
+        axes[trfi].set_ylim([0.001, 10]);
 
         if funlabels is not None:
             axes[trfi].set_title(funlabels[trfi])
@@ -384,13 +404,13 @@ def plotKLcontours(X, Y, KLs, titles=None):
 #        cs = axes[c].contourf(X, Y, np.log10(KLs[:, :, c]), 100,
 #                              vmin=-2.0, vmax=2.0, extend='both', cmap='Blues')
         cs = axes[c].pcolormesh(bounds(X, dx), bounds(Y, dy),
-                                np.log10(KLs[:, :, c]), vmin=-3.0, vmax=2.0,
+                                np.log10(KLs[:, :, c]), vmin=-3.0, vmax=1.0,
                                 cmap='Blues')
 
         cb = fig.colorbar(cs, ax=axes[c], extend='both')
-#        cb.set_label('$D_{KL}$')
+        cb.set_label('$W$')
 
-        axes[c].plot(X[KLs[:, :, c].argmin(axis=1)], Y, '.', color='0.6')
+        axes[c].plot(X[KLs[:, :, c].argmin(axis=1)], Y, '.', color='0.5')
 
         if titles is not None:
             axes[c].set_title(titles[c])
